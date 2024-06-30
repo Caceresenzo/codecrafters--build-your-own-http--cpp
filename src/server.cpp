@@ -6,6 +6,7 @@
 #include <map>
 #include <vector>
 #include <optional>
+#include <memory>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -14,7 +15,7 @@
 
 #define PORT 4221
 
-struct CaseInsensitive
+struct CaseInsensitiveComparator
 {
   bool operator()(const std::string &lhs, const std::string &rhs) const
   {
@@ -22,7 +23,7 @@ struct CaseInsensitive
   }
 };
 
-typedef std::map<std::string, std::string, CaseInsensitive> HeaderMap;
+typedef std::map<std::string, std::string, CaseInsensitiveComparator> HeaderMap;
 
 size_t recv_line(int fd, std::string &result)
 {
@@ -231,10 +232,38 @@ Response response_route(const Request &request)
   return (Response(Status::NOT_FOUND));
 }
 
-int main(int argc, char **argv)
+struct Encoder
+{
+
+  virtual std::vector<unsigned char> encode(std::vector<unsigned char> &input) = 0;
+
+};
+
+struct GzipEncoder : public Encoder
+{
+
+  std::vector<unsigned char> encode(std::vector<unsigned char> &input)
+  {
+    return (input);
+  };
+
+};
+
+typedef std::map<std::string, std::shared_ptr<Encoder>> EncoderMap;
+
+typename EncoderMap::iterator encoder_find(EncoderMap &encoders, const std::string accept_encodings)
+{
+  return (encoders.find(accept_encodings));
+}
+
+int
+main(int argc, char **argv)
 {
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
+
+  EncoderMap encoders;
+  encoders.insert(std::make_pair("gzip", std::make_shared<GzipEncoder>()));
 
   for (int index = 0; index < argc; ++index)
   {
@@ -315,7 +344,21 @@ int main(int argc, char **argv)
     send(client_fd, buffer, strlen(buffer), 0);
 
     if (response.body.has_value())
+    {
+      auto accept_encoding_entry = request.headers.find("Accept-Encoding");
+      if (accept_encoding_entry != request.headers.end())
+      {
+        auto encoder_entry = encoder_find(encoders, accept_encoding_entry->second);
+
+        if (encoder_entry != encoders.end())
+        {
+          response.headers["Content-Encoding"] = encoder_entry->first;
+          response.body = encoder_entry->second->encode(response.body.value());
+        }
+      }
+
       response.headers["Content-Length"] = std::to_string(response.body->size());
+    }
 
     for (auto iterator = response.headers.begin(); iterator != response.headers.end(); ++iterator)
     {
