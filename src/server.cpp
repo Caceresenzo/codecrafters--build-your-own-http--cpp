@@ -63,6 +63,7 @@ enum class Method
 enum class Status
 {
   OK = 200,
+  CREATED = 201,
   NOT_FOUND = 404,
 };
 
@@ -83,6 +84,7 @@ struct Request
   Method method;
   std::string path;
   HeaderMap headers;
+  std::optional<std::vector<unsigned char>> body;
 
   std::string get_user_agent() const
   {
@@ -110,6 +112,9 @@ std::string status_get_phrase(Status status)
   {
   case Status::OK:
     return ("OK");
+
+  case Status::CREATED:
+    return ("Created");
 
   case Status::NOT_FOUND:
     return ("Not Found");
@@ -147,6 +152,15 @@ Request request_parse(int client_fd)
     request.headers.insert(std::make_pair(key, value));
   }
 
+  auto content_length_entry = request.headers.find("Content-Length");
+  if (content_length_entry != request.headers.end())
+  {
+    int content_length = std::stoi(content_length_entry->second);
+    request.body = std::vector<unsigned char>(content_length, 0);
+
+    recv(client_fd, &(*request.body->begin()), content_length, 0);
+  }
+
   return (request);
 }
 
@@ -180,6 +194,22 @@ Response response_route(const Request &request)
   if (request.path.rfind("/files/", 0) == 0)
   {
     std::string path = request.path.substr(7);
+
+    if (request.method == Method::POST)
+    {
+      std::ofstream stream;
+      stream.open(path);
+
+      if (!stream.is_open())
+        return Response(Status::NOT_FOUND);
+
+      if (request.body.has_value())
+        stream.write((const char *)&(*request.body->begin()), request.body->size());
+
+      stream.close();
+
+      return Response(Status::CREATED);
+    }
 
     std::ifstream stream;
     stream.open(path);
