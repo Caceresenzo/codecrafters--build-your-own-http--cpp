@@ -1,4 +1,5 @@
 #include <iostream>
+#include <fstream>
 #include <cstdlib>
 #include <string>
 #include <cstring>
@@ -54,10 +55,14 @@ int main(int argc, char **argv)
 
   std::cout << "Waiting for a client to connect..." << std::endl;
 
-  accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+  int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
   std::cout << "Client connected" << std::endl;
 
+  const char* response = "HTTP/1.1 200 OK\r\n\r\n";
+  send(client_fd, response, strlen(response), 0);
+
   close(server_fd);
+  close(client_fd);
 
   return (EXIT_SUCCESS);
 }
