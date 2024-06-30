@@ -236,7 +236,6 @@ struct Encoder
 {
 
   virtual std::vector<unsigned char> encode(std::vector<unsigned char> &input) = 0;
-
 };
 
 struct GzipEncoder : public Encoder
@@ -246,18 +245,35 @@ struct GzipEncoder : public Encoder
   {
     return (input);
   };
-
 };
 
 typedef std::map<std::string, std::shared_ptr<Encoder>> EncoderMap;
 
-typename EncoderMap::iterator encoder_find(EncoderMap &encoders, const std::string accept_encodings)
+typename EncoderMap::iterator encoder_find(EncoderMap &encoders, std::string accept_encodings)
 {
-  return (encoders.find(accept_encodings));
+  static const std::string delimiter = ", ";
+
+  while (!accept_encodings.empty())
+  {
+    size_t offset = accept_encodings.find(delimiter);
+
+    std::string accept_encoding = accept_encodings.substr(0, offset);
+    auto entry = encoders.find(accept_encoding);
+    if (entry != encoders.end())
+    {
+      return (entry);
+    }
+
+    if (offset == std::string::npos)
+      break;
+
+    accept_encodings.erase(0, offset + delimiter.length());
+  }
+
+  return (encoders.end());
 }
 
-int
-main(int argc, char **argv)
+int main(int argc, char **argv)
 {
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
