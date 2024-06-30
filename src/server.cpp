@@ -82,6 +82,17 @@ struct Request
 {
   Method method;
   std::string path;
+  HeaderMap headers;
+
+  std::string get_user_agent() const
+  {
+    auto iterator = headers.find("User-Agent");
+
+    if (iterator == headers.end())
+      return ("");
+
+    return (iterator->second);
+  }
 };
 
 struct Response
@@ -111,11 +122,11 @@ std::string status_get_phrase(Status status)
 Request request_parse(int client_fd)
 {
   Request request;
-
   std::string line;
-  recv_line(client_fd, line);
 
   {
+    recv_line(client_fd, line);
+
     const std::string delimiter = " ";
 
     size_t offset = line.find(delimiter);
@@ -124,6 +135,16 @@ Request request_parse(int client_fd)
 
     offset = line.find(delimiter);
     request.path = line.substr(0, offset);
+  }
+
+  const std::string delimiter = ": ";
+  while (recv_line(client_fd, line) > 0)
+  {
+    size_t offset = line.find(delimiter);
+    std::string key = line.substr(0, offset);
+    std::string value = line.substr(offset + delimiter.length());
+
+    request.headers.insert(std::make_pair(key, value));
   }
 
   return (request);
@@ -141,6 +162,17 @@ Response response_route(const Request &request)
     Response response = Response(Status::OK);
     response.headers["Content-Type"] = "text/plain";
     response.body = std::vector<unsigned char>(request.path.begin() + 6, request.path.end());
+
+    return (response);
+  }
+
+  if (request.path == "/user-agent")
+  {
+    std::string user_agent = request.get_user_agent();
+
+    Response response = Response(Status::OK);
+    response.headers["Content-Type"] = "text/plain";
+    response.body = std::vector<unsigned char>(user_agent.begin(), user_agent.end());
 
     return (response);
   }
