@@ -142,7 +142,7 @@ int main(int argc, char **argv)
   }
   else
   {
-    const char *response = "HTTP/1.1 404 OK\r\n\r\n";
+    const char *response = "HTTP/1.1 404 Not Found\r\n\r\n";
     send(client_fd, response, strlen(response), 0);
   }
 
