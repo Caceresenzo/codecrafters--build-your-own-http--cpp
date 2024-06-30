@@ -222,36 +222,52 @@ int main(int argc, char **argv)
   struct sockaddr_in client_addr;
   int client_addr_len = sizeof(client_addr);
 
-  std::cout << "Waiting for a client to connect..." << std::endl;
-
-  int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
-  std::cout << "Client connected" << std::endl;
-
-  Request request = request_parse(client_fd);
-  Response response = response_route(request);
-
-  char buffer[512];
-
-  std::string phrase = status_get_phrase(response.status);
-  sprintf(buffer, "HTTP/1.1 %d %s\r\n", response.status, phrase.c_str());
-  send(client_fd, buffer, strlen(buffer), 0);
-
-  if (response.body.has_value())
-    response.headers["Content-Length"] = std::to_string(response.body->size());
-
-  for (auto iterator = response.headers.begin(); iterator != response.headers.end(); ++iterator)
+  while (true)
   {
-    sprintf(buffer, "%s: %s\r\n", iterator->first.c_str(), iterator->second.c_str());
+    int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
+    std::cout << "client connected" << std::endl;
+
+    pid_t pid = fork();
+    if (pid == -1)
+    {
+      perror("fork");
+      close(client_fd);
+      break;
+    }
+
+    if (pid != 0)
+    {
+      close(client_fd);
+      continue;
+    }
+
+    Request request = request_parse(client_fd);
+    Response response = response_route(request);
+
+    char buffer[512];
+
+    std::string phrase = status_get_phrase(response.status);
+    sprintf(buffer, "HTTP/1.1 %d %s\r\n", response.status, phrase.c_str());
     send(client_fd, buffer, strlen(buffer), 0);
+
+    if (response.body.has_value())
+      response.headers["Content-Length"] = std::to_string(response.body->size());
+
+    for (auto iterator = response.headers.begin(); iterator != response.headers.end(); ++iterator)
+    {
+      sprintf(buffer, "%s: %s\r\n", iterator->first.c_str(), iterator->second.c_str());
+      send(client_fd, buffer, strlen(buffer), 0);
+    }
+
+    send(client_fd, "\r\n", 2, 0);
+
+    if (response.body.has_value())
+      send(client_fd, &(*response.body->begin()), response.body->size(), 0);
+
+    close(client_fd);
+    return (EXIT_SUCCESS);
   }
 
-  send(client_fd, "\r\n", 2, 0);
-
-  if (response.body.has_value())
-    send(client_fd, &(*response.body->begin()), response.body->size(), 0);
-
   close(server_fd);
-  close(client_fd);
-
   return (EXIT_SUCCESS);
 }
