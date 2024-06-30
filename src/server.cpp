@@ -177,6 +177,27 @@ Response response_route(const Request &request)
     return (response);
   }
 
+  if (request.path.rfind("/files/", 0) == 0)
+  {
+    std::string path = request.path.substr(7);
+
+    std::ifstream stream;
+    stream.open(path);
+
+    if (!stream.is_open())
+      return Response(Status::NOT_FOUND);
+
+    std::string content(std::istreambuf_iterator<char>{stream}, {});
+
+    stream.close();
+
+    Response response = Response(Status::OK);
+    response.headers["Content-Type"] = "text/plain";
+    response.body = std::vector<unsigned char>(content.begin(), content.end());
+
+    return (response);
+  }
+
   return (Response(Status::NOT_FOUND));
 }
 
@@ -184,6 +205,19 @@ int main(int argc, char **argv)
 {
   std::cout << std::unitbuf;
   std::cerr << std::unitbuf;
+
+  for (int index = 0; index < argc; ++index)
+  {
+    if (strcmp("--directory", argv[index]) == 0)
+    {
+      ++index;
+      if (chdir(argv[index]) == -1)
+      {
+        perror("chdir");
+        return (EXIT_FAILURE);
+      }
+    }
+  }
 
   int server_fd = socket(AF_INET, SOCK_STREAM, 0);
   if (server_fd < 0)
