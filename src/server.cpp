@@ -12,6 +12,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netdb.h>
+#include <zlib.h>
 
 #define PORT 4221
 
@@ -243,7 +244,25 @@ struct GzipEncoder : public Encoder
 
   std::vector<unsigned char> encode(std::vector<unsigned char> &input)
   {
-    return (input);
+    size_t input_size = input.size();
+    size_t output_size = 128 + input_size;
+    std::vector<unsigned char> output(output_size, 0);
+
+    z_stream z;
+    z.zalloc = Z_NULL;
+    z.zfree = Z_NULL;
+    z.opaque = Z_NULL;
+    z.avail_in = input_size;
+    z.next_in = &(*input.begin());
+    z.avail_out = output_size;
+    z.next_out = &(*output.begin());
+
+    deflateInit2(&z, Z_DEFAULT_COMPRESSION, Z_DEFLATED, 15 | 16, 8, Z_DEFAULT_STRATEGY);
+    deflate(&z, Z_FINISH);
+    deflateEnd(&z);
+
+    output.resize(z.total_out);
+    return (output);
   };
 };
 
