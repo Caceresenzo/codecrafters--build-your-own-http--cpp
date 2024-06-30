@@ -3,6 +3,9 @@
 #include <cstdlib>
 #include <string>
 #include <cstring>
+#include <map>
+#include <vector>
+#include <optional>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -10,6 +13,16 @@
 #include <netdb.h>
 
 #define PORT 4221
+
+struct CaseInsensitive
+{
+  bool operator()(const std::string &lhs, const std::string &rhs) const
+  {
+    return (strcasecmp(lhs.c_str(), rhs.c_str()) < 0);
+  }
+};
+
+typedef std::map<std::string, std::string, CaseInsensitive> HeaderMap;
 
 size_t recv_line(int fd, std::string &result)
 {
@@ -47,6 +60,12 @@ enum class Method
   POST,
 };
 
+enum class Status
+{
+  OK = 200,
+  NOT_FOUND = 404,
+};
+
 Method
 method_parse(const std::string &input)
 {
@@ -64,6 +83,30 @@ struct Request
   Method method;
   std::string path;
 };
+
+struct Response
+{
+  Status status;
+  HeaderMap headers;
+  std::optional<std::vector<unsigned char>> body;
+
+  Response(Status status) : status(status) {}
+};
+
+std::string status_get_phrase(Status status)
+{
+  switch (status)
+  {
+  case Status::OK:
+    return ("OK");
+
+  case Status::NOT_FOUND:
+    return ("Not Found");
+
+  default:
+    return ("");
+  }
+}
 
 Request request_parse(int client_fd)
 {
@@ -84,6 +127,25 @@ Request request_parse(int client_fd)
   }
 
   return (request);
+}
+
+Response response_route(const Request &request)
+{
+  if (request.path == "/")
+  {
+    return (Response(Status::OK));
+  }
+
+  if (request.path.rfind("/echo/", 0) == 0)
+  {
+    Response response = Response(Status::OK);
+    response.headers["Content-Type"] = "text/plain";
+    response.body = std::vector<unsigned char>(request.path.begin() + 6, request.path.end());
+
+    return (response);
+  }
+
+  return (Response(Status::NOT_FOUND));
 }
 
 int main(int argc, char **argv)
@@ -134,17 +196,27 @@ int main(int argc, char **argv)
   std::cout << "Client connected" << std::endl;
 
   Request request = request_parse(client_fd);
+  Response response = response_route(request);
 
-  if (request.path == "/")
+  char buffer[512];
+
+  std::string phrase = status_get_phrase(response.status);
+  sprintf(buffer, "HTTP/1.1 %d %s\r\n", response.status, phrase.c_str());
+  send(client_fd, buffer, strlen(buffer), 0);
+
+  if (response.body.has_value())
+    response.headers["Content-Length"] = std::to_string(response.body->size());
+
+  for (auto iterator = response.headers.begin(); iterator != response.headers.end(); ++iterator)
   {
-    const char *response = "HTTP/1.1 200 OK\r\n\r\n";
-    send(client_fd, response, strlen(response), 0);
+    sprintf(buffer, "%s: %s\r\n", iterator->first.c_str(), iterator->second.c_str());
+    send(client_fd, buffer, strlen(buffer), 0);
   }
-  else
-  {
-    const char *response = "HTTP/1.1 404 Not Found\r\n\r\n";
-    send(client_fd, response, strlen(response), 0);
-  }
+
+  send(client_fd, "\r\n", 2, 0);
+
+  if (response.body.has_value())
+    send(client_fd, &(*response.body->begin()), response.body->size(), 0);
 
   close(server_fd);
   close(client_fd);
