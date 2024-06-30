@@ -192,7 +192,7 @@ Response response_route(const Request &request)
     stream.close();
 
     Response response = Response(Status::OK);
-    response.headers["Content-Type"] = "text/plain";
+    response.headers["Content-Type"] = "application/octet-stream";
     response.body = std::vector<unsigned char>(content.begin(), content.end());
 
     return (response);
