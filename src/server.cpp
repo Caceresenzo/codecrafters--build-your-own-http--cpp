@@ -332,6 +332,18 @@ void encode(EncoderMap &encoders, Request &request, Response &response)
   response.headers["Content-Length"] = std::to_string(response.body->size());
 }
 
+bool should_close(Request &request, Response &response)
+{
+  auto connection = request.headers.find("Connection");
+  if (connection != request.headers.end() && connection->second == "close")
+  {
+    response.headers["Connection"] = "close";
+    return true;
+  }
+
+  return false;
+}
+
 void handle(int client_fd, int client_id, EncoderMap &encoders)
 {
   while (true)
@@ -343,6 +355,7 @@ void handle(int client_fd, int client_id, EncoderMap &encoders)
     Response response = response_route(request.value());
 
     encode(encoders, request.value(), response);
+    bool should_break = should_close(request.value(), response);
 
     std::string phrase = status_get_phrase(response.status);
     std::cout << client_id << ": " << method_get_name(request->method) << " " << request->path << " " << (int)response.status << " " << phrase << std::endl;
@@ -362,6 +375,9 @@ void handle(int client_fd, int client_id, EncoderMap &encoders)
 
     if (response.body.has_value())
       send(client_fd, &(*response.body->begin()), response.body->size(), 0);
+
+    if (should_break)
+      break;
   }
 }
 
