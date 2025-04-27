@@ -108,6 +108,21 @@ struct Response
   Response(Status status) : status(status) {}
 };
 
+std::string method_get_name(Method method)
+{
+  switch (method)
+  {
+  case Method::GET:
+    return ("GET");
+
+  case Method::POST:
+    return ("POST");
+
+  default:
+    return ("UNKNOWN");
+  }
+}
+
 std::string status_get_phrase(Status status)
 {
   switch (status)
@@ -126,13 +141,15 @@ std::string status_get_phrase(Status status)
   }
 }
 
-Request request_parse(int client_fd)
+std::optional<Request> request_parse(int client_fd)
 {
   Request request;
   std::string line;
 
   {
-    recv_line(client_fd, line);
+    size_t read = recv_line(client_fd, line);
+    if (read == -1)
+      return (std::nullopt);
 
     const std::string delimiter = " ";
 
@@ -292,6 +309,62 @@ typename EncoderMap::iterator encoder_find(EncoderMap &encoders, std::string acc
   return (encoders.end());
 }
 
+void encode(EncoderMap &encoders, Request &request, Response &response)
+{
+  if (!response.body.has_value())
+  {
+    response.headers["Content-Length"] = "0";
+    return;
+  }
+
+  auto accept_encoding_entry = request.headers.find("Accept-Encoding");
+  if (accept_encoding_entry != request.headers.end())
+  {
+    auto encoder_entry = encoder_find(encoders, accept_encoding_entry->second);
+
+    if (encoder_entry != encoders.end())
+    {
+      response.headers["Content-Encoding"] = encoder_entry->first;
+      response.body = encoder_entry->second->encode(response.body.value());
+    }
+  }
+
+  response.headers["Content-Length"] = std::to_string(response.body->size());
+}
+
+void handle(int client_fd, int client_id, EncoderMap &encoders)
+{
+  while (true)
+  {
+    std::optional<Request> request = request_parse(client_fd);
+    if (!request.has_value())
+      break;
+
+    Response response = response_route(request.value());
+
+    encode(encoders, request.value(), response);
+
+    std::string phrase = status_get_phrase(response.status);
+    std::cout << client_id << ": " << method_get_name(request->method) << " " << request->path << " " << (int)response.status << " " << phrase << std::endl;
+
+    char buffer[512];
+
+    sprintf(buffer, "HTTP/1.1 %d %s\r\n", response.status, phrase.c_str());
+    send(client_fd, buffer, strlen(buffer), 0);
+
+    for (auto iterator = response.headers.begin(); iterator != response.headers.end(); ++iterator)
+    {
+      sprintf(buffer, "%s: %s\r\n", iterator->first.c_str(), iterator->second.c_str());
+      send(client_fd, buffer, strlen(buffer), 0);
+    }
+
+    send(client_fd, "\r\n", 2, 0);
+
+    if (response.body.has_value())
+      send(client_fd, &(*response.body->begin()), response.body->size(), 0);
+  }
+}
+
 int main(int argc, char **argv)
 {
   std::cout << std::unitbuf;
@@ -350,10 +423,13 @@ int main(int argc, char **argv)
   struct sockaddr_in client_addr;
   int client_addr_len = sizeof(client_addr);
 
+  int client_id_increment = 0;
+
   while (true)
   {
+    int client_id = ++client_id_increment;
+
     int client_fd = accept(server_fd, (struct sockaddr *)&client_addr, (socklen_t *)&client_addr_len);
-    std::cout << "client connected" << std::endl;
 
     pid_t pid = fork();
     if (pid == -1)
@@ -369,42 +445,9 @@ int main(int argc, char **argv)
       continue;
     }
 
-    Request request = request_parse(client_fd);
-    Response response = response_route(request);
-
-    char buffer[512];
-
-    std::string phrase = status_get_phrase(response.status);
-    sprintf(buffer, "HTTP/1.1 %d %s\r\n", response.status, phrase.c_str());
-    send(client_fd, buffer, strlen(buffer), 0);
-
-    if (response.body.has_value())
-    {
-      auto accept_encoding_entry = request.headers.find("Accept-Encoding");
-      if (accept_encoding_entry != request.headers.end())
-      {
-        auto encoder_entry = encoder_find(encoders, accept_encoding_entry->second);
-
-        if (encoder_entry != encoders.end())
-        {
-          response.headers["Content-Encoding"] = encoder_entry->first;
-          response.body = encoder_entry->second->encode(response.body.value());
-        }
-      }
-
-      response.headers["Content-Length"] = std::to_string(response.body->size());
-    }
-
-    for (auto iterator = response.headers.begin(); iterator != response.headers.end(); ++iterator)
-    {
-      sprintf(buffer, "%s: %s\r\n", iterator->first.c_str(), iterator->second.c_str());
-      send(client_fd, buffer, strlen(buffer), 0);
-    }
-
-    send(client_fd, "\r\n", 2, 0);
-
-    if (response.body.has_value())
-      send(client_fd, &(*response.body->begin()), response.body->size(), 0);
+    std::cout << client_id << ": client connected" << std::endl;
+    handle(client_fd, client_id, encoders);
+    std::cout << client_id << ": client disconnected" << std::endl;
 
     close(client_fd);
     return (EXIT_SUCCESS);
